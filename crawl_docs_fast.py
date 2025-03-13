@@ -4,23 +4,46 @@ import sys
 import psutil
 import asyncio
 import requests
+import argparse
 from xml.etree import ElementTree
-
-__location__ = os.path.dirname(os.path.abspath(__file__))
-__output__ = os.path.join(__location__, "results")
-
-# Ensure output directory exists
-os.makedirs(__output__, exist_ok=True)
-
-# Append parent directory to system path
-parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.append(parent_dir)
 
 from typing import List
 from crawl4ai import AsyncWebCrawler, BrowserConfig, CrawlerRunConfig, CacheMode
 
-async def crawl_parallel(urls: List[str], max_concurrent: int = 3):
-    print("\n=== Parallel Crawling with Browser Reuse + Memory Check ===")
+def parse_arguments():
+    """Parse command line arguments."""
+    parser = argparse.ArgumentParser(description='Crawl websites from a sitemap URL.')
+    parser.add_argument('-w', '--website', 
+                        required=True,
+                        help='The sitemap URL to crawl (e.g., https://example.com/sitemap.xml)')
+    parser.add_argument('-o', '--output', 
+                        default='results',
+                        help='The folder name to save markdown files (default: results)')
+    parser.add_argument('-c', '--concurrent', 
+                        type=int, 
+                        default=10,
+                        help='Maximum number of concurrent crawls (default: 10)')
+    return parser.parse_args()
+
+def setup_output_directory(output_folder):
+    """Set up the output directory for storing results."""
+    # Get the location of the script
+    __location__ = os.path.dirname(os.path.abspath(__file__))
+    # Create the full path for the output directory
+    __output__ = os.path.join(__location__, output_folder)
+    
+    # Ensure output directory exists
+    os.makedirs(__output__, exist_ok=True)
+    
+    return __output__
+
+def setup_system_path():
+    """Add parent directory to the system path."""
+    parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    sys.path.append(parent_dir)
+
+async def crawl_parallel(urls: List[str], output_dir: str, max_concurrent: int = 3):
+    print(f"\n=== Parallel Crawling with Browser Reuse + Memory Check (Max Concurrent: {max_concurrent}) ===")
 
     # We'll keep track of peak memory usage across all tasks
     peak_memory = 0
@@ -36,7 +59,7 @@ async def crawl_parallel(urls: List[str], max_concurrent: int = 3):
     # Minimal browser config
     browser_config = BrowserConfig(
         headless=True,
-        verbose=False,   # corrected from 'verbos=False'
+        verbose=False,
         extra_args=["--disable-gpu", "--disable-dev-shm-usage", "--no-sandbox"],
     )
     crawl_config = CrawlerRunConfig(cache_mode=CacheMode.BYPASS)
@@ -85,7 +108,8 @@ async def crawl_parallel(urls: List[str], max_concurrent: int = 3):
                     filtered_markdown = remove_malformed_links(raw_markdown)
 
                     # Save content to markdown file
-                    filename = os.path.join(__output__, f"{url.replace('https://', '').replace('/', '_')}.md")
+                    safe_filename = create_safe_filename(url)
+                    filename = os.path.join(output_dir, f"{safe_filename}.md")
                     with open(filename, "w", encoding="utf-8") as file:
                         file.write(f"# Crawled Content from {url}\n\n")
                         file.write(filtered_markdown)
@@ -104,6 +128,25 @@ async def crawl_parallel(urls: List[str], max_concurrent: int = 3):
         log_memory(prefix="Final: ")
         print(f"\nPeak memory usage (MB): {peak_memory // (1024 * 1024)}")
 
+def create_safe_filename(url: str) -> str:
+    """
+    Creates a safe filename from a URL by removing invalid characters.
+    
+    Args:
+        url (str): The URL to convert
+        
+    Returns:
+        str: A safe filename
+    """
+    # Remove protocol and common separators, then replace invalid characters
+    safe_name = url.replace('https://', '').replace('http://', '').replace('www.', '')
+    safe_name = re.sub(r'[\\/*?:"<>|]', '_', safe_name)
+    # Replace multiple slashes and dots with single underscore
+    safe_name = re.sub(r'[/\.]+', '_', safe_name)
+    # Limit filename length
+    if len(safe_name) > 200:
+        safe_name = safe_name[:200]
+    return safe_name
 
 def remove_malformed_links(content: str) -> str:
     """
@@ -133,16 +176,16 @@ def remove_malformed_links(content: str) -> str:
     
     return content
 
-
-def get_docs():
+def get_urls_from_sitemap(sitemap_url: str) -> List[str]:
     """
-    Fetches all URLs from the Cloudsynapps AI documentation.
-    Uses the sitemap (https://www.cloudsynapps.com/page-sitemap.xml) to get these URLs.
+    Fetches all URLs from a sitemap.
     
+    Args:
+        sitemap_url (str): The URL of the sitemap
+        
     Returns:
         List[str]: List of URLs
-    """            
-    sitemap_url = "https://www.cloudsynapps.com/page-sitemap.xml"
+    """
     try:
         response = requests.get(sitemap_url)
         response.raise_for_status()
@@ -158,15 +201,27 @@ def get_docs():
         return urls
     except Exception as e:
         print(f"Error fetching sitemap: {e}")
-        return []        
+        return []
 
 async def main():
-    urls = get_docs()
+    # Parse command line arguments
+    args = parse_arguments()
+    
+    # Setup system path
+    setup_system_path()
+    
+    # Setup output directory
+    output_dir = setup_output_directory(args.output)
+    
+    # Get URLs from sitemap
+    urls = get_urls_from_sitemap(args.website)
+    
     if urls:
         print(f"Found {len(urls)} URLs to crawl")
-        await crawl_parallel(urls, max_concurrent=10)
+        print(f"Output directory: {output_dir}")
+        await crawl_parallel(urls, output_dir, max_concurrent=args.concurrent)
     else:
-        print("No URLs found to crawl")    
+        print("No URLs found to crawl")
 
 if __name__ == "__main__":
     asyncio.run(main())
