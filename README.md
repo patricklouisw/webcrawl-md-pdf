@@ -2,7 +2,11 @@
 
 ## How to run the python script
 1. web to md: `python crawl_docs_fast.py` (currently it is hardcoded to CloudSynapps website)
-3. md to pdf:
+- Input sitemap and output folder:
+`python crawl_docs_fast.py -w "https://www.cloudsynapps.com/page-sitemap.xml" -o my_docs`
+- adjust the number of concurrent crawls:
+`python crawl_docs_fast.py -w "https://www.cloudsynapps.com/page-sitemap.xml" -o results -c 5`
+2. md to pdf:
   - Using wildcards to convert multiple files at once: `python markdown_to_pdf.py "*.md"`
   - Converting all markdown files in a specific directory: `python markdown_to_pdf.py "docs/*.md"`
   - Converting all markdown files recursively in subdirectories: `python markdown_to_pdf.py "**/*.md"`
